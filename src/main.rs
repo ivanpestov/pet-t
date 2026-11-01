@@ -15,7 +15,6 @@ use zbus::{
 };
 
 const DISPLAY_INTERVAL: Duration = Duration::from_secs(60);
-const SUSPEND_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 
 struct Config {
     account: Option<String>,
@@ -279,10 +278,10 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
                 println!();
                 let close_result = close_ledger(&mut ledger);
                 let _ = release.send(());
+                eprintln!("System suspend detected; timer stopped");
                 if close_result.is_err() {
                     return 1;
                 }
-                eprintln!("System suspend detected; timer stopped");
                 return 0;
             }
             Ok(Event::MonitorFailed(error)) => {
@@ -417,7 +416,7 @@ fn run_sleep_monitor(
             if events.send(Event::Suspend(release_tx)).is_err() {
                 return Ok(());
             }
-            let _ = release_rx.recv_timeout(SUSPEND_RELEASE_TIMEOUT);
+            let _ = release_rx.recv();
             return Ok(());
         }
     }
