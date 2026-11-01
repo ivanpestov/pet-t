@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::{
     env,
     fs::{File, OpenOptions},
