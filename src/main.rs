@@ -8,6 +8,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use unicode_ident::{is_xid_continue, is_xid_start};
 use zbus::{
     blocking::{Connection, Proxy},
     zvariant::OwnedFd,
@@ -152,13 +153,8 @@ impl Config {
         let arguments: Vec<String> = env::args().skip(1).collect();
         let (account, minutes) = match arguments.as_slice() {
             [minutes] => (None, minutes),
-            [account, minutes] if !account.is_empty() => {
-                if account.contains(['\n', '\r']) {
-                    return Err("account cannot contain a newline".to_owned());
-                }
-                (Some(account.clone()), minutes)
-            }
-            [_account, _minutes] => return Err("account cannot be empty".to_owned()),
+            [account, minutes] if is_valid_account(account) => (Some(account.clone()), minutes),
+            [_account, _minutes] => return Err("invalid account".to_owned()),
             _ => return Err("invalid arguments".to_owned()),
         };
         let minutes = minutes
@@ -175,6 +171,76 @@ impl Config {
         }
         Ok(Self { account, duration })
     }
+}
+
+fn is_valid_account(account: &str) -> bool {
+    account.split(':').all(|segment| {
+        if segment == "_" || is_rust_keyword(segment) {
+            return false;
+        }
+        let mut chars = segment.chars();
+        chars
+            .next()
+            .is_some_and(|first| first == '_' || is_xid_start(first))
+            && chars.all(is_xid_continue)
+    })
+}
+
+fn is_rust_keyword(segment: &str) -> bool {
+    matches!(
+        segment,
+        "as" | "async"
+            | "await"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "gen"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "try"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+    )
 }
 
 fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Event>) -> i32 {
