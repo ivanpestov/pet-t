@@ -36,7 +36,9 @@ impl TestDir {
         fs::create_dir_all(&bin).expect("create stub directory");
         write_executable(
             &bin.join("date"),
-            &format!("#!/bin/sh\nprintf '%s\\n' '{TIMESTAMP}'\n"),
+            &format!(
+                "#!/bin/sh\ncase \"$1\" in\n  +%H:%M) printf '12:34\\n' ;;\n  *) printf '%s\\n' '{TIMESTAMP}' ;;\nesac\n"
+            ),
         );
         write_executable(
             &bin.join("notify-send"),
@@ -145,7 +147,7 @@ fn natural_completion_writes_period_and_notifies() {
         fs::read_to_string(dir.path.join("notify.log")).expect("read notification log"),
         "Timer finished Time is up\n"
     );
-    assert!(String::from_utf8_lossy(&output.stdout).ends_with("\r00:00:00\n"));
+    assert!(String::from_utf8_lossy(&output.stdout).ends_with("\r12:34 => 00:00 => 12:35\n"));
 }
 
 #[test]

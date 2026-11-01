@@ -246,8 +246,16 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
     let start = Instant::now();
     let deadline = start + duration;
     let mut next_display = start + DISPLAY_INTERVAL;
+    let started_at = match local_minutes() {
+        Ok(started_at) => started_at,
+        Err(error) => {
+            eprintln!("cannot display timer: {error}");
+            return close_after_error(ledger);
+        }
+    };
+    let finishes_at = (started_at + duration.as_secs() / 60) % (24 * 60);
 
-    if let Err(error) = display_remaining(duration) {
+    if let Err(error) = display_status(started_at, finishes_at, duration) {
         eprintln!("cannot display timer: {error}");
         return close_after_error(ledger);
     }
@@ -255,7 +263,7 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
     loop {
         let now = Instant::now();
         if now >= deadline {
-            if let Err(error) = display_remaining(Duration::ZERO) {
+            if let Err(error) = display_status(started_at, finishes_at, Duration::ZERO) {
                 eprintln!("cannot display timer: {error}");
                 return close_after_error(ledger);
             }
@@ -292,7 +300,8 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
             Err(RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
                 if now >= next_display && now < deadline {
-                    if let Err(error) = display_remaining(deadline.saturating_duration_since(now)) {
+                    let remaining = deadline.saturating_duration_since(now);
+                    if let Err(error) = display_status(started_at, finishes_at, remaining) {
                         eprintln!("cannot display timer: {error}");
                         return close_after_error(ledger);
                     }
@@ -328,13 +337,45 @@ fn report_close_result(result: Result<(), ()>) -> i32 {
     if result.is_ok() { 0 } else { 1 }
 }
 
-fn display_remaining(remaining: Duration) -> io::Result<()> {
+fn display_status(started_at: u64, finishes_at: u64, remaining: Duration) -> io::Result<()> {
     let seconds = remaining.as_secs() + u64::from(remaining.subsec_nanos() != 0);
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let seconds = seconds % 60;
-    print!("\r{hours:02}:{minutes:02}:{seconds:02}");
+    let remaining_minutes = seconds.div_ceil(60);
+    let hours = remaining_minutes / 60;
+    let minutes = remaining_minutes % 60;
+    print!(
+        "\r{:02}:{:02} => {hours:02}:{minutes:02} => {:02}:{:02}",
+        started_at / 60,
+        started_at % 60,
+        finishes_at / 60,
+        finishes_at % 60
+    );
     io::stdout().flush()
+}
+
+fn local_minutes() -> Result<u64, String> {
+    let output = Command::new("date")
+        .arg("+%H:%M")
+        .output()
+        .map_err(|error| format!("cannot run date: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("date exited with {}", output.status));
+    }
+    let time = String::from_utf8(output.stdout)
+        .map_err(|error| format!("date returned invalid UTF-8: {error}"))?;
+    let time = time.trim();
+    let (hours, minutes) = time
+        .split_once(':')
+        .ok_or_else(|| format!("date returned invalid local time: {time}"))?;
+    let hours = hours
+        .parse::<u64>()
+        .map_err(|_| format!("date returned invalid local time: {time}"))?;
+    let minutes = minutes
+        .parse::<u64>()
+        .map_err(|_| format!("date returned invalid local time: {time}"))?;
+    if hours >= 24 || minutes >= 60 {
+        return Err(format!("date returned invalid local time: {time}"));
+    }
+    Ok(hours * 60 + minutes)
 }
 
 fn local_timestamp() -> Result<String, String> {
