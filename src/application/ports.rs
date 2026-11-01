@@ -58,6 +58,12 @@ impl fmt::Display for LedgerError {
 
 impl std::error::Error for LedgerError {}
 
+impl From<ClockError> for LedgerError {
+    fn from(error: ClockError) -> Self {
+        Self(error.to_string())
+    }
+}
+
 /// Уведомления. Отправка не влияет на код выхода, поэтому ошибок порт не
 /// возвращает; fallback выполняет реализация через переданный поток
 /// диагностики.
