@@ -74,13 +74,8 @@ impl Ledger {
     }
 
     fn start(&mut self) -> Result<(), String> {
-        let prefix = if self.needs_newline { "\n" } else { "" };
-        let entry = format!("{prefix}i {} {}\n", local_timestamp()?, self.account);
-        self.file
-            .write_all(entry.as_bytes())
-            .and_then(|()| self.file.flush())
-            .map_err(|error| format!("cannot write {}: {error}", self.path.display()))?;
-        self.needs_newline = false;
+        let entry = format!("i {} {}\n", local_timestamp()?, self.account);
+        self.append(&entry)?;
         self.active = true;
         Ok(())
     }
@@ -90,11 +85,19 @@ impl Ledger {
             return Ok(());
         }
         let entry = format!("o {}\n", local_timestamp()?);
+        self.append(&entry)?;
+        self.active = false;
+        Ok(())
+    }
+
+    fn append(&mut self, entry: &str) -> Result<(), String> {
+        let prefix = if self.needs_newline { "\n" } else { "" };
+        let entry = format!("{prefix}{entry}");
         self.file
             .write_all(entry.as_bytes())
             .and_then(|()| self.file.flush())
             .map_err(|error| format!("cannot write {}: {error}", self.path.display()))?;
-        self.active = false;
+        self.needs_newline = false;
         Ok(())
     }
 }
