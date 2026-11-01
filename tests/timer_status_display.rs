@@ -19,12 +19,16 @@ impl TestDir {
     }
 
     fn command(&self, minutes: u64) -> Command {
+        self.command_with_date(
+            minutes,
+            "#!/bin/sh\ncase \"$1\" in\n  +%H:%M)\n    count=0\n    [ -f \"$DATE_COUNTER\" ] && count=$(cat \"$DATE_COUNTER\")\n    case \"$count\" in\n      0) printf '12:34\\n' ;;\n      *) printf '12:41\\n' ;;\n    esac\n    printf '%s' \"$((count + 1))\" > \"$DATE_COUNTER\"\n    ;;\n  *) printf '2026/11/01 12:34:56\\n' ;;\nesac\n",
+        )
+    }
+
+    fn command_with_date(&self, minutes: u64, date: &str) -> Command {
         let bin = self.0.join("bin");
         fs::create_dir_all(&bin).expect("create stub directory");
-        write_executable(
-            &bin.join("date"),
-            "#!/bin/sh\ncase \"$1\" in\n  +%H:%M) printf '12:34\\n' ;;\n  *) printf '2026/11/01 12:34:56\\n' ;;\nesac\n",
-        );
+        write_executable(&bin.join("date"), date);
         write_executable(&bin.join("notify-send"), "#!/bin/sh\nexit 0\n");
 
         let inherited_path = env::var_os("PATH").unwrap_or_default();
@@ -38,6 +42,7 @@ impl TestDir {
             .arg("work")
             .arg(minutes.to_string())
             .env("LEDGER_FILE", self.0.join("time.ledger"))
+            .env("DATE_COUNTER", self.0.join("date-count"))
             .env("PATH", path)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -136,7 +141,10 @@ fn initial_status_contains_fixed_boundaries_and_duration_over_an_hour() {
     let (status, stdout) = timer.interrupt();
 
     assert_eq!(status.code(), Some(130));
-    assert_eq!(stdout, "\r12:34 => 01:30 => 14:04\n");
+    assert_eq!(
+        stdout,
+        "\r12:34 => 01:30 => 14:04\r12:34 => 01:30 => 12:41\n"
+    );
     assert!(!stdout.contains("work"));
 }
 
@@ -152,6 +160,21 @@ fn minute_update_rounds_remaining_time_up_without_changing_boundaries() {
     assert_eq!(status.code(), Some(130));
     assert_eq!(
         stdout,
-        "\r12:34 => 00:02 => 12:36\r12:34 => 00:01 => 12:36\n"
+        "\r12:34 => 00:02 => 12:36\r12:34 => 00:01 => 12:36\r12:34 => 00:01 => 12:41\n"
     );
+}
+
+#[test]
+fn startup_error_before_the_initial_status_prints_no_final_status() {
+    let dir = TestDir::new("startup-error");
+    let output = dir
+        .command_with_date(
+            1,
+            "#!/bin/sh\ncase \"$1\" in\n  +%H:%M) exit 1 ;;\n  *) printf '2026/11/01 12:34:56\\n' ;;\nesac\n",
+        )
+        .output()
+        .expect("run timer");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
 }

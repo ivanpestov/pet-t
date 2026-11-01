@@ -253,9 +253,9 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
             return close_after_error(ledger);
         }
     };
-    let finishes_at = (started_at + duration.as_secs() / 60) % (24 * 60);
+    let planned_finish_at = (started_at + duration.as_secs() / 60) % (24 * 60);
 
-    if let Err(error) = display_status(started_at, finishes_at, duration) {
+    if let Err(error) = display_status(started_at, planned_finish_at, duration) {
         eprintln!("cannot display timer: {error}");
         return close_after_error(ledger);
     }
@@ -263,29 +263,36 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
     loop {
         let now = Instant::now();
         if now >= deadline {
-            if let Err(error) = display_status(started_at, finishes_at, Duration::ZERO) {
-                eprintln!("cannot display timer: {error}");
-                return close_after_error(ledger);
-            }
-            println!();
-            let close_result = close_ledger(&mut ledger);
-            notify();
-            return report_close_result(close_result);
+            return finish_naturally(started_at, ledger);
         }
 
         let wake_at = next_display.min(deadline);
-        match events.recv_timeout(wake_at.saturating_duration_since(now)) {
+        let received = events.recv_timeout(wake_at.saturating_duration_since(now));
+        let now = Instant::now();
+        if now >= deadline {
+            return finish_naturally(started_at, ledger);
+        }
+        let remaining = deadline.saturating_duration_since(now);
+
+        match received {
             Ok(Event::Interrupt) => {
-                println!();
-                return match close_ledger(&mut ledger) {
+                let display_result = display_finished_status(started_at, remaining);
+                let close_result = close_ledger(&mut ledger);
+                if let Err(error) = &display_result {
+                    eprintln!("cannot display timer: {error}");
+                }
+                return match close_result {
                     Ok(()) => 130,
                     Err(()) => 1,
                 };
             }
             Ok(Event::Suspend(release)) => {
-                println!();
+                let display_result = display_finished_status(started_at, remaining);
                 let close_result = close_ledger(&mut ledger);
                 let _ = release.send(());
+                if let Err(error) = &display_result {
+                    eprintln!("cannot display timer: {error}");
+                }
                 eprintln!("System suspend detected; timer stopped");
                 if close_result.is_err() {
                     return 1;
@@ -293,15 +300,15 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
                 return 0;
             }
             Ok(Event::MonitorFailed(error)) => {
-                println!();
+                if let Err(error) = display_finished_status(started_at, remaining) {
+                    eprintln!("cannot display timer: {error}");
+                }
                 eprintln!("system sleep monitor failed: {error}");
                 return close_after_error(ledger);
             }
             Err(RecvTimeoutError::Timeout) => {
-                let now = Instant::now();
-                if now >= next_display && now < deadline {
-                    let remaining = deadline.saturating_duration_since(now);
-                    if let Err(error) = display_status(started_at, finishes_at, remaining) {
+                if now >= next_display {
+                    if let Err(error) = display_status(started_at, planned_finish_at, remaining) {
                         eprintln!("cannot display timer: {error}");
                         return close_after_error(ledger);
                     }
@@ -311,11 +318,25 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
                 }
             }
             Err(RecvTimeoutError::Disconnected) => {
+                if let Err(error) = display_finished_status(started_at, remaining) {
+                    eprintln!("cannot display timer: {error}");
+                }
                 eprintln!("timer event channel disconnected");
                 return close_after_error(ledger);
             }
         }
     }
+}
+
+fn finish_naturally(started_at: u64, mut ledger: Option<Ledger>) -> i32 {
+    let display_result = display_finished_status(started_at, Duration::ZERO);
+    let close_result = close_ledger(&mut ledger);
+    notify();
+    if let Err(error) = display_result {
+        eprintln!("cannot display timer: {error}");
+        return 1;
+    }
+    report_close_result(close_result)
 }
 
 fn close_ledger(ledger: &mut Option<Ledger>) -> Result<(), ()> {
@@ -350,6 +371,13 @@ fn display_status(started_at: u64, finishes_at: u64, remaining: Duration) -> io:
         finishes_at % 60
     );
     io::stdout().flush()
+}
+
+fn display_finished_status(started_at: u64, remaining: Duration) -> Result<(), String> {
+    let finished_at = local_minutes()?;
+    display_status(started_at, finished_at, remaining).map_err(|error| error.to_string())?;
+    println!();
+    Ok(())
 }
 
 fn local_minutes() -> Result<u64, String> {
