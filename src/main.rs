@@ -8,13 +8,13 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use unicode_ident::{is_xid_continue, is_xid_start};
 use zbus::{
     blocking::{Connection, Proxy},
     zvariant::OwnedFd,
 };
 
 const DISPLAY_INTERVAL: Duration = Duration::from_secs(60);
-const SUSPEND_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 
 struct Config {
     account: Option<String>,
@@ -74,13 +74,8 @@ impl Ledger {
     }
 
     fn start(&mut self) -> Result<(), String> {
-        let prefix = if self.needs_newline { "\n" } else { "" };
-        let entry = format!("{prefix}i {} {}\n", local_timestamp()?, self.account);
-        self.file
-            .write_all(entry.as_bytes())
-            .and_then(|()| self.file.flush())
-            .map_err(|error| format!("cannot write {}: {error}", self.path.display()))?;
-        self.needs_newline = false;
+        let entry = format!("i {} {}\n", local_timestamp()?, self.account);
+        self.append(&entry)?;
         self.active = true;
         Ok(())
     }
@@ -90,11 +85,19 @@ impl Ledger {
             return Ok(());
         }
         let entry = format!("o {}\n", local_timestamp()?);
+        self.append(&entry)?;
+        self.active = false;
+        Ok(())
+    }
+
+    fn append(&mut self, entry: &str) -> Result<(), String> {
+        let prefix = if self.needs_newline { "\n" } else { "" };
+        let entry = format!("{prefix}{entry}");
         self.file
             .write_all(entry.as_bytes())
             .and_then(|()| self.file.flush())
             .map_err(|error| format!("cannot write {}: {error}", self.path.display()))?;
-        self.active = false;
+        self.needs_newline = false;
         Ok(())
     }
 }
@@ -149,13 +152,8 @@ impl Config {
         let arguments: Vec<String> = env::args().skip(1).collect();
         let (account, minutes) = match arguments.as_slice() {
             [minutes] => (None, minutes),
-            [account, minutes] if !account.is_empty() => {
-                if account.contains(['\n', '\r']) {
-                    return Err("account cannot contain a newline".to_owned());
-                }
-                (Some(account.clone()), minutes)
-            }
-            [_account, _minutes] => return Err("account cannot be empty".to_owned()),
+            [account, minutes] if is_valid_account(account) => (Some(account.clone()), minutes),
+            [_account, _minutes] => return Err("invalid account".to_owned()),
             _ => return Err("invalid arguments".to_owned()),
         };
         let minutes = minutes
@@ -172,6 +170,76 @@ impl Config {
         }
         Ok(Self { account, duration })
     }
+}
+
+fn is_valid_account(account: &str) -> bool {
+    account.split(':').all(|segment| {
+        if segment == "_" || is_rust_keyword(segment) {
+            return false;
+        }
+        let mut chars = segment.chars();
+        chars
+            .next()
+            .is_some_and(|first| first == '_' || is_xid_start(first))
+            && chars.all(is_xid_continue)
+    })
+}
+
+fn is_rust_keyword(segment: &str) -> bool {
+    matches!(
+        segment,
+        "as" | "async"
+            | "await"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "gen"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "try"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+    )
 }
 
 fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Event>) -> i32 {
@@ -210,10 +278,10 @@ fn run_timer(duration: Duration, mut ledger: Option<Ledger>, events: Receiver<Ev
                 println!();
                 let close_result = close_ledger(&mut ledger);
                 let _ = release.send(());
+                eprintln!("System suspend detected; timer stopped");
                 if close_result.is_err() {
                     return 1;
                 }
-                eprintln!("System suspend detected; timer stopped");
                 return 0;
             }
             Ok(Event::MonitorFailed(error)) => {
@@ -348,7 +416,7 @@ fn run_sleep_monitor(
             if events.send(Event::Suspend(release_tx)).is_err() {
                 return Ok(());
             }
-            let _ = release_rx.recv_timeout(SUSPEND_RELEASE_TIMEOUT);
+            let _ = release_rx.recv();
             return Ok(());
         }
     }
