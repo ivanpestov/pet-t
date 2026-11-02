@@ -32,7 +32,7 @@ pub fn run(
     if let (Some(account), Some(writer)) = (&config.account, ledger.as_mut())
         && let Err(error) = writer.open_period(account)
     {
-        let _ = writeln!(diagnostics, "{error}");
+        writeln!(diagnostics, "{error}").expect("failed printing to stderr");
         return Outcome::Failed;
     }
 
@@ -42,7 +42,8 @@ pub fn run(
     let started_at = match clock.local_minutes() {
         Ok(started_at) => started_at,
         Err(error) => {
-            let _ = writeln!(diagnostics, "cannot display timer: {error}");
+            writeln!(diagnostics, "cannot display timer: {error}")
+                .expect("failed printing to stderr");
             let _ = close_ledger(&mut ledger, diagnostics);
             return Outcome::Failed;
         }
@@ -50,7 +51,7 @@ pub fn run(
     let planned_finish_at = planned_finish(started_at, config.duration);
 
     if let Err(error) = display_status(started_at, planned_finish_at, config.duration, state) {
-        let _ = writeln!(diagnostics, "cannot display timer: {error}");
+        writeln!(diagnostics, "cannot display timer: {error}").expect("failed printing to stderr");
         let _ = close_ledger(&mut ledger, diagnostics);
         return Outcome::Failed;
     }
@@ -74,7 +75,8 @@ pub fn run(
                 let display_result = display_finished_status(started_at, remaining, clock, state);
                 let close_result = close_ledger(&mut ledger, diagnostics);
                 if let Err(error) = &display_result {
-                    let _ = writeln!(diagnostics, "cannot display timer: {error}");
+                    writeln!(diagnostics, "cannot display timer: {error}")
+                        .expect("failed printing to stderr");
                 }
                 return Outcome::Interrupted {
                     closed: close_result.is_ok(),
@@ -85,9 +87,11 @@ pub fn run(
                 let close_result = close_ledger(&mut ledger, diagnostics);
                 let _ = release.send(());
                 if let Err(error) = &display_result {
-                    let _ = writeln!(diagnostics, "cannot display timer: {error}");
+                    writeln!(diagnostics, "cannot display timer: {error}")
+                        .expect("failed printing to stderr");
                 }
-                let _ = writeln!(diagnostics, "System suspend detected; timer stopped");
+                writeln!(diagnostics, "System suspend detected; timer stopped")
+                    .expect("failed printing to stderr");
                 return Outcome::Suspended {
                     closed: close_result.is_ok(),
                 };
@@ -96,9 +100,11 @@ pub fn run(
                 if let Err(display_error) =
                     display_finished_status(started_at, remaining, clock, state)
                 {
-                    let _ = writeln!(diagnostics, "cannot display timer: {display_error}");
+                    writeln!(diagnostics, "cannot display timer: {display_error}")
+                        .expect("failed printing to stderr");
                 }
-                let _ = writeln!(diagnostics, "system sleep monitor failed: {error}");
+                writeln!(diagnostics, "system sleep monitor failed: {error}")
+                    .expect("failed printing to stderr");
                 let _ = close_ledger(&mut ledger, diagnostics);
                 return Outcome::Failed;
             }
@@ -107,7 +113,8 @@ pub fn run(
                     if let Err(error) =
                         display_status(started_at, planned_finish_at, remaining, state)
                     {
-                        let _ = writeln!(diagnostics, "cannot display timer: {error}");
+                        writeln!(diagnostics, "cannot display timer: {error}")
+                            .expect("failed printing to stderr");
                         let _ = close_ledger(&mut ledger, diagnostics);
                         return Outcome::Failed;
                     }
@@ -118,9 +125,11 @@ pub fn run(
             }
             Err(RecvTimeoutError::Disconnected) => {
                 if let Err(error) = display_finished_status(started_at, remaining, clock, state) {
-                    let _ = writeln!(diagnostics, "cannot display timer: {error}");
+                    writeln!(diagnostics, "cannot display timer: {error}")
+                        .expect("failed printing to stderr");
                 }
-                let _ = writeln!(diagnostics, "timer event channel disconnected");
+                writeln!(diagnostics, "timer event channel disconnected")
+                    .expect("failed printing to stderr");
                 let _ = close_ledger(&mut ledger, diagnostics);
                 return Outcome::Failed;
             }
@@ -141,13 +150,15 @@ fn close_ledger(
     {
         Ok(_) => Ok(()),
         Err(error) => {
-            let _ = writeln!(diagnostics, "{error}");
+            writeln!(diagnostics, "{error}").expect("failed printing to stderr");
             Err(())
         }
     }
 }
 
-/// Выводит строку состояния и сбрасывает буфер.
+/// Выводит строку состояния и сбрасывает буфер. Ошибка записи — авария,
+/// как у `print!`; ошибка сброса — восстановимая, сценарий сообщает о ней
+/// как о невозможности отобразить Таймер.
 fn display_status(
     started_at: MinuteOfDay,
     finishes_at: MinuteOfDay,
@@ -155,7 +166,7 @@ fn display_status(
     state: &mut dyn Write,
 ) -> io::Result<()> {
     let status = TimerStatus::new(started_at, remaining, finishes_at);
-    write!(state, "{}", status.render())?;
+    write!(state, "{}", status.render()).expect("failed printing to stdout");
     state.flush()
 }
 
@@ -169,10 +180,8 @@ fn display_finished_status(
 ) -> Result<(), String> {
     let finished_at = clock.local_minutes().map_err(|error| error.to_string())?;
     display_status(started_at, finished_at, remaining, state).map_err(|error| error.to_string())?;
-    state
-        .write_all(b"\n")
-        .and_then(|()| state.flush())
-        .map_err(|error| error.to_string())?;
+    state.write_all(b"\n").expect("failed printing to stdout");
+    state.flush().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -200,7 +209,7 @@ fn finish_naturally(
     let displayed = display_result.is_ok();
     let closed = close_result.is_ok();
     if let Err(error) = display_result {
-        let _ = writeln!(diagnostics, "cannot display timer: {error}");
+        writeln!(diagnostics, "cannot display timer: {error}").expect("failed printing to stderr");
     }
     Outcome::Completed { displayed, closed }
 }
@@ -342,7 +351,7 @@ mod tests {
 
     impl Notifier for BellNotifier {
         fn notify(&self, title: &str, _message: &str, diagnostics: &mut dyn Write) {
-            let _ = writeln!(diagnostics, "\x07{title}");
+            writeln!(diagnostics, "\x07{title}").expect("failed printing to stderr");
         }
     }
 
@@ -359,10 +368,6 @@ mod tests {
                 fail_at: call,
             }
         }
-
-        fn calls(&self) -> usize {
-            self.calls.get()
-        }
     }
 
     impl Write for FailOnWrite {
@@ -375,6 +380,43 @@ mod tests {
         }
 
         fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Поток состояния с исправной записью, падающий на сбросе буфера с
+    /// заданным порядковым номером сброса.
+    struct FailOnFlush {
+        calls: Cell<usize>,
+        flushes: Cell<usize>,
+        fail_at: usize,
+    }
+
+    impl FailOnFlush {
+        fn failing_at(flush: usize) -> Self {
+            Self {
+                calls: Cell::new(0),
+                flushes: Cell::new(0),
+                fail_at: flush,
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.get()
+        }
+    }
+
+    impl Write for FailOnFlush {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.calls.set(self.calls.get() + 1);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes.set(self.flushes.get() + 1);
+            if self.flushes.get() == self.fail_at {
+                return Err(io::Error::other("boom"));
+            }
             Ok(())
         }
     }
@@ -504,7 +546,7 @@ mod tests {
         let mut ledger = FakeLedger::working();
         let notifier = BellNotifier;
         let (_tx, rx) = mpsc::channel();
-        let mut state = FailOnWrite::failing_at(2);
+        let mut state = FailOnFlush::failing_at(2);
         let mut diagnostics = Vec::new();
 
         let outcome = run(
@@ -596,13 +638,13 @@ mod tests {
     }
 
     #[test]
-    fn initial_state_write_failure_reports_and_closes_period() {
+    fn initial_state_flush_failure_reports_and_closes_period() {
         let config = config(Duration::from_secs(300), true);
         let clock = FakeClock::local(vec![Ok(time(12, 34))]);
         let mut ledger = FakeLedger::working();
         let notifier = FakeNotifier::default();
         let (_tx, rx) = mpsc::channel();
-        let mut state = FailOnWrite::failing_at(1);
+        let mut state = FailOnFlush::failing_at(1);
         let mut diagnostics = Vec::new();
 
         let outcome = run(
@@ -619,6 +661,28 @@ mod tests {
         assert_eq!(*lock(&ledger.closes), 1);
         assert_eq!(text(&diagnostics), "cannot display timer: boom\n");
         assert!(notifier.calls().is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "failed printing to stdout")]
+    fn initial_state_write_failure_panics() {
+        let config = config(Duration::from_secs(300), true);
+        let clock = FakeClock::local(vec![Ok(time(12, 34))]);
+        let mut ledger = FakeLedger::working();
+        let notifier = FakeNotifier::default();
+        let (_tx, rx) = mpsc::channel();
+        let mut state = FailOnWrite::failing_at(1);
+        let mut diagnostics = Vec::new();
+
+        run(
+            &config,
+            &clock,
+            Some(&mut ledger),
+            &notifier,
+            &rx,
+            &mut state,
+            &mut diagnostics,
+        );
     }
 
     #[test]
@@ -692,7 +756,7 @@ mod tests {
         let mut ledger = FakeLedger::working();
         let notifier = FakeNotifier::default();
         let (tx, rx) = mpsc::channel();
-        let mut state = FailOnWrite::failing_at(2);
+        let mut state = FailOnFlush::failing_at(2);
         let mut diagnostics = Vec::new();
 
         let outcome = thread::scope(|scope| {
