@@ -1,6 +1,7 @@
 use std::{
-    env, fs,
+    env,
     ffi::{OsStr, OsString},
+    fs,
     os::unix::{ffi::OsStringExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
