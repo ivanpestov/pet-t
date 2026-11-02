@@ -39,21 +39,41 @@ impl TestDir {
         previous: impl AsRef<OsStr>,
         ledger_file: &Path,
     ) -> Output {
+        self.complete_with_env(current, previous, Some(ledger_file), &self.stub_path())
+    }
+
+    /// Runs `t --complete <current> <previous>` with an explicit PATH and
+    /// an optional LEDGER_FILE (removed from the child environment when
+    /// absent).
+    fn complete_with_env(
+        &self,
+        current: impl AsRef<OsStr>,
+        previous: impl AsRef<OsStr>,
+        ledger_file: Option<&Path>,
+        path: &OsStr,
+    ) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_t"));
         command
             .arg("--complete")
             .arg(current.as_ref())
             .arg(previous.as_ref())
-            .env("LEDGER_FILE", ledger_file)
-            .env("PATH", self.stub_path())
+            .env("PATH", path)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        match ledger_file {
+            Some(ledger_file) => {
+                command.env("LEDGER_FILE", ledger_file);
+            }
+            None => {
+                command.env_remove("LEDGER_FILE");
+            }
+        }
         command.output().expect("run completion mode")
     }
 
     /// PATH with the stub directory prepended to the inherited value.
-    fn stub_path(&self) -> std::ffi::OsString {
+    fn stub_path(&self) -> OsString {
         let bin = self.path.join("bin");
         let inherited = env::var_os("PATH").unwrap_or_default();
         env::join_paths(
@@ -83,6 +103,14 @@ impl Drop for TestDir {
     }
 }
 
+/// TestDir with an empty ledger file created inside it.
+fn dir_with_ledger(label: &str) -> (TestDir, PathBuf) {
+    let dir = TestDir::new(label);
+    let ledger = dir.ledger_file();
+    fs::write(&ledger, "").expect("create ledger file");
+    (dir, ledger)
+}
+
 fn write_executable(path: &Path, contents: &str) {
     fs::write(path, contents).expect("write command stub");
     let mut permissions = fs::metadata(path).expect("stat command stub").permissions();
@@ -92,9 +120,7 @@ fn write_executable(path: &Path, contents: &str) {
 
 #[test]
 fn empty_current_word_lists_all_accounts() {
-    let dir = TestDir::new("all");
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
+    let (dir, ledger) = dir_with_ledger("all");
 
     let output = dir.complete("", "t", &ledger);
 
@@ -113,9 +139,7 @@ fn empty_current_word_lists_all_accounts() {
 
 #[test]
 fn current_word_filters_candidates_by_prefix() {
-    let dir = TestDir::new("prefix");
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
+    let (dir, ledger) = dir_with_ledger("prefix");
 
     let output = dir.complete("wo", "t", &ledger);
 
@@ -129,9 +153,7 @@ fn current_word_filters_candidates_by_prefix() {
 
 #[test]
 fn prefix_match_is_case_sensitive() {
-    let dir = TestDir::new("case");
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
+    let (dir, ledger) = dir_with_ledger("case");
 
     let output = dir.complete("Wo", "t", &ledger);
 
@@ -145,9 +167,7 @@ fn prefix_match_is_case_sensitive() {
 
 #[test]
 fn other_previous_word_completes_to_nothing() {
-    let dir = TestDir::new("second-arg");
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
+    let (dir, ledger) = dir_with_ledger("second-arg");
 
     let output = dir.complete("", "5", &ledger);
 
@@ -158,21 +178,11 @@ fn other_previous_word_completes_to_nothing() {
 
 #[test]
 fn missing_ledger_yields_empty_output() {
-    let dir = TestDir::new("no-ledger");
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
+    let (dir, ledger) = dir_with_ledger("no-ledger");
     let empty_bin = dir.path.join("empty-bin");
     fs::create_dir_all(&empty_bin).expect("create empty bin directory");
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_t"));
-    command
-        .arg("--complete")
-        .arg("wo")
-        .arg("t")
-        .env("LEDGER_FILE", &ledger)
-        .env("PATH", &empty_bin)
-        .stdin(Stdio::null());
-    let output = command.output().expect("run completion mode");
+    let output = dir.complete_with_env("wo", "t", Some(&ledger), empty_bin.as_os_str());
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
@@ -182,15 +192,9 @@ fn missing_ledger_yields_empty_output() {
 #[test]
 fn missing_ledger_file_yields_empty_output() {
     let dir = TestDir::new("no-ledger-file");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_t"));
-    command
-        .arg("--complete")
-        .arg("")
-        .arg("t")
-        .env_remove("LEDGER_FILE")
-        .env("PATH", dir.path.join("bin"))
-        .stdin(Stdio::null());
-    let output = command.output().expect("run completion mode");
+    let stub_bin = dir.path.join("bin");
+
+    let output = dir.complete_with_env("", "t", None, stub_bin.as_os_str());
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
@@ -199,9 +203,7 @@ fn missing_ledger_file_yields_empty_output() {
 
 #[test]
 fn non_utf8_current_word_does_not_panic() {
-    let dir = TestDir::new("non-utf8");
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
+    let (dir, ledger) = dir_with_ledger("non-utf8");
     let current = OsString::from_vec(vec![b'w', b'o', 0xff]);
 
     let output = dir.complete(&current, "t", &ledger);
@@ -218,9 +220,7 @@ fn non_utf8_current_word_does_not_panic() {
 
 #[test]
 fn byte_built_prefix_still_filters_candidates() {
-    let dir = TestDir::new("byte-prefix");
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
+    let (dir, ledger) = dir_with_ledger("byte-prefix");
     let current = OsString::from_vec(b"wo".to_vec());
 
     let output = dir.complete(&current, "t", &ledger);
@@ -235,13 +235,11 @@ fn byte_built_prefix_still_filters_candidates() {
 
 #[test]
 fn empty_line_in_ledger_output_is_preserved() {
-    let dir = TestDir::new("empty-line");
+    let (dir, ledger) = dir_with_ledger("empty-line");
     write_executable(
         &dir.path.join("bin").join("ledger"),
         "#!/bin/sh\nprintf 'work\\n\\npersonal\\n'",
     );
-    let ledger = dir.ledger_file();
-    fs::write(&ledger, "").expect("create ledger file");
 
     let output = dir.complete("", "t", &ledger);
 
