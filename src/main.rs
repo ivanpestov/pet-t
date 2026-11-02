@@ -14,7 +14,8 @@ fn main() {
 
 fn run() -> i32 {
     if let Some(request) = args::completion_request() {
-        return completion::run(&request);
+        completion::run(&request);
+        return 0;
     }
 
     let config = match args::parse() {
@@ -66,8 +67,8 @@ fn run() -> i32 {
     exit_code(outcome)
 }
 
-/// Переводит исход прогона в код выхода процесса. Это единственное место,
-/// где выбирается код.
+/// Переводит исход прогона в код выхода процесса. Код выбирает бинарник
+/// при композиции, адаптеры его не возвращают.
 fn exit_code(outcome: Outcome) -> i32 {
     match outcome {
         Outcome::Completed { displayed, closed } => {
