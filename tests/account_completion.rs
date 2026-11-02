@@ -232,3 +232,23 @@ fn byte_built_prefix_still_filters_candidates() {
     );
     assert!(output.stderr.is_empty());
 }
+
+#[test]
+fn empty_line_in_ledger_output_is_preserved() {
+    let dir = TestDir::new("empty-line");
+    write_executable(
+        &dir.path.join("bin").join("ledger"),
+        "#!/bin/sh\nprintf 'work\\n\\npersonal\\n'",
+    );
+    let ledger = dir.ledger_file();
+    fs::write(&ledger, "").expect("create ledger file");
+
+    let output = dir.complete("", "t", &ledger);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("utf8 stdout"),
+        "work\n\npersonal\n"
+    );
+    assert!(output.stderr.is_empty());
+}
