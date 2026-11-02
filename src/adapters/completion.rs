@@ -6,14 +6,13 @@ use std::process::{Command, Stdio};
 
 use crate::adapters::args::CompletionRequest;
 
-/// Выполняет режим автодополнения: печатает кандидатов в stdout и
-/// возвращает код выхода процесса (всегда 0). Сценарий Таймера, Ctrl+C,
+/// Выполняет режим автодополнения: печатает кандидатов в stdout. Код
+/// выхода выбирает бинарник при композиции. Сценарий Таймера, Ctrl+C,
 /// монитор сна и уведомления не затрагиваются.
-pub fn run(request: &CompletionRequest) -> i32 {
+pub fn run(request: &CompletionRequest) {
     if request.previous == "t" {
         print_candidates(&request.current);
     }
-    0
 }
 
 /// Печатает по строке на кандидата: stdout `ledger accounts` без
