@@ -65,8 +65,8 @@ fn run(events: &Sender<Event>, ready: &Sender<Result<(), String>>) -> Result<(),
             if events.send(Event::Suspend(release_tx)).is_err() {
                 return Ok(());
             }
-            // Без собственного таймаута: inhibitor освобождается только
-            // после того, как сценарий подтвердит освобождение.
+            // No timeout of its own: the inhibitor is released only after
+            // the scenario has acknowledged the release.
             let _ = release_rx.recv();
             return Ok(());
         }

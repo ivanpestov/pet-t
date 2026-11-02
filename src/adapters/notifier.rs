@@ -17,7 +17,7 @@ impl Notifier for NotifySend {
             .status()
             .is_ok_and(|status| status.success());
         if !sent {
-            let _ = writeln!(diagnostics, "\x07{title}");
+            writeln!(diagnostics, "\x07{title}").expect("failed printing to stderr");
         }
     }
 }
