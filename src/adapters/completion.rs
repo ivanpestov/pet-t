@@ -33,9 +33,15 @@ fn print_candidates(current: &OsStr) {
     if !output.status.success() {
         return;
     }
+    if output.stdout.is_empty() {
+        return;
+    }
+    // Завершающий перевод строки завершает последнюю строку, но пустой
+    // строкой не считается; пустые строки внутри вывода сохраняются.
+    let body = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
     let mut stdout = std::io::stdout().lock();
-    for line in output.stdout.split(|byte| *byte == b'\n') {
-        if line.is_empty() || !line.starts_with(current) {
+    for line in body.split(|byte| *byte == b'\n') {
+        if !line.starts_with(current) {
             continue;
         }
         if stdout
