@@ -3,7 +3,8 @@
 use std::{io, process, sync::mpsc};
 
 use t::adapters::{
-    args, date_clock::DateClock, file_ledger::FileLedger, interrupt, notifier, sleep_monitor,
+    args, completion, date_clock::DateClock, file_ledger::FileLedger, interrupt, notifier,
+    sleep_monitor,
 };
 use t::application::{self, outcome::Outcome, ports::LedgerWriter};
 
@@ -12,6 +13,10 @@ fn main() {
 }
 
 fn run() -> i32 {
+    if let Some(request) = args::completion_request() {
+        return completion::run(&request);
+    }
+
     let config = match args::parse() {
         Ok(config) => config,
         Err(error) => {
