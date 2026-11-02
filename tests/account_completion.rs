@@ -1,6 +1,7 @@
 use std::{
     env, fs,
-    os::unix::fs::PermissionsExt,
+    ffi::{OsStr, OsString},
+    os::unix::{ffi::OsStringExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -31,12 +32,17 @@ impl TestDir {
 
     /// Runs `t --complete <current> <previous>` with the stub ledger on
     /// PATH and LEDGER_FILE set to `ledger_file`.
-    fn complete(&self, current: &str, previous: &str, ledger_file: &Path) -> Output {
+    fn complete(
+        &self,
+        current: impl AsRef<OsStr>,
+        previous: impl AsRef<OsStr>,
+        ledger_file: &Path,
+    ) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_t"));
         command
             .arg("--complete")
-            .arg(current)
-            .arg(previous)
+            .arg(current.as_ref())
+            .arg(previous.as_ref())
             .env("LEDGER_FILE", ledger_file)
             .env("PATH", self.stub_path())
             .stdin(Stdio::null())
@@ -187,5 +193,41 @@ fn missing_ledger_file_yields_empty_output() {
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn non_utf8_current_word_does_not_panic() {
+    let dir = TestDir::new("non-utf8");
+    let ledger = dir.ledger_file();
+    fs::write(&ledger, "").expect("create ledger file");
+    let current = OsString::from_vec(vec![b'w', b'o', 0xff]);
+
+    let output = dir.complete(&current, "t", &ledger);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn byte_built_prefix_still_filters_candidates() {
+    let dir = TestDir::new("byte-prefix");
+    let ledger = dir.ledger_file();
+    fs::write(&ledger, "").expect("create ledger file");
+    let current = OsString::from_vec(b"wo".to_vec());
+
+    let output = dir.complete(&current, "t", &ledger);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("utf8 stdout"),
+        "work\nwork:call\n"
+    );
     assert!(output.stderr.is_empty());
 }
