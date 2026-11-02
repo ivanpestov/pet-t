@@ -1,5 +1,6 @@
 //! Разбор аргументов командной строки.
 
+use std::ffi::OsString;
 use std::time::{Duration, Instant};
 
 use crate::application::config::Config;
@@ -28,6 +29,32 @@ impl std::fmt::Display for ArgsError {
 }
 
 impl std::error::Error for ArgsError {}
+
+/// Запрос скрытого режима автодополнения: текущее и предыдущее слово
+/// командной строки по протоколу `t --complete <текущее> <предыдущее>`.
+/// Слова хранятся как получены от ОС: сравнение — байтовое.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionRequest {
+    pub current: OsString,
+    pub previous: OsString,
+}
+
+/// Обнаруживает скрытый режим автодополнения до обычного разбора
+/// аргументов; любой другой набор аргументов передаётся обычному разбору.
+/// Слово сравнивается байтами, а не через Unicode: протокол допускает
+/// не-UTF-8 argv и паниковать процесс не должен.
+pub fn completion_request() -> Option<CompletionRequest> {
+    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
+    match arguments.as_slice() {
+        [flag, current, previous] if flag.as_encoded_bytes() == "--complete".as_bytes() => {
+            Some(CompletionRequest {
+                current: current.clone(),
+                previous: previous.clone(),
+            })
+        }
+        _ => None,
+    }
+}
 
 /// Разбирает аргументы процесса в Config. Account валидируется
 /// конструктором на этой границе и дальше передаётся проверенным.

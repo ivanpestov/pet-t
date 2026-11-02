@@ -3,7 +3,8 @@
 use std::{io, process, sync::mpsc};
 
 use t::adapters::{
-    args, date_clock::DateClock, file_ledger::FileLedger, interrupt, notifier, sleep_monitor,
+    args, completion, date_clock::DateClock, file_ledger::FileLedger, interrupt, notifier,
+    sleep_monitor,
 };
 use t::application::{self, outcome::Outcome, ports::LedgerWriter};
 
@@ -12,6 +13,11 @@ fn main() {
 }
 
 fn run() -> i32 {
+    if let Some(request) = args::completion_request() {
+        completion::run(&request);
+        return 0;
+    }
+
     let config = match args::parse() {
         Ok(config) => config,
         Err(error) => {
@@ -61,8 +67,8 @@ fn run() -> i32 {
     exit_code(outcome)
 }
 
-/// Переводит исход прогона в код выхода процесса. Это единственное место,
-/// где выбирается код.
+/// Переводит исход прогона в код выхода процесса. Код выбирает бинарник
+/// при композиции, адаптеры его не возвращают.
 fn exit_code(outcome: Outcome) -> i32 {
     match outcome {
         Outcome::Completed { displayed, closed } => {
