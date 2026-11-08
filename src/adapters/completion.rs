@@ -1,5 +1,5 @@
-//! Скрытый режим автодополнения Account для shell: кандидаты из вывода
-//! `ledger accounts`, отфильтрованные по префиксу текущего слова.
+//! Скрытый режим автодополнения Account для shell: печать bash-скрипта
+//! и кандидатов из вывода `ledger accounts` по префиксу текущего слова.
 
 use std::ffi::OsStr;
 use std::io::Write;
@@ -7,13 +7,39 @@ use std::process::{Command, Stdio};
 
 use crate::adapters::args::CompletionRequest;
 
-/// Выполняет режим автодополнения: печатает кандидатов в stdout. Код
-/// выхода выбирает бинарник при композиции. Сценарий Таймера, Ctrl+C,
-/// монитор сна и уведомления не затрагиваются.
+/// Bash-скрипт, который регистрирует функцию дополнения и передаёт
+/// текущее и предыдущее слово скрытому режиму бинарника. `complete -C`
+/// не используется: bash добавляет к команде имя дополняемой команды.
+const BASH_SCRIPT: &str = r#"# bash completion for t
+_t_completion() {
+    local current="${COMP_WORDS[COMP_CWORD]}"
+    local previous="${COMP_WORDS[COMP_CWORD-1]}"
+    COMPREPLY=()
+    mapfile -t COMPREPLY < <(command t --complete "$current" "$previous")
+}
+complete -F _t_completion t
+"#;
+
+/// Выполняет режим автодополнения. Скрипт и кандидаты печатаются в
+/// stdout; ошибки записи подавляются, код выхода выбирает бинарник при
+/// композиции. Сценарий Таймера, Ctrl+C, монитор сна и уведомления не
+/// затрагиваются.
 pub fn run(request: &CompletionRequest) {
-    if request.previous.as_encoded_bytes() == b"t" {
-        print_candidates(&request.current);
+    match request {
+        CompletionRequest::Script => print_script(),
+        CompletionRequest::Candidates { current, previous } => {
+            if previous.as_encoded_bytes() == b"t" {
+                print_candidates(current);
+            }
+        }
     }
+}
+
+/// Печатает bash-скрипт без изменений.
+fn print_script() {
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout.write_all(BASH_SCRIPT.as_bytes());
+    let _ = stdout.flush();
 }
 
 /// Печатает по строке на кандидата: stdout `ledger accounts` без

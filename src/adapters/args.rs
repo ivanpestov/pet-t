@@ -30,13 +30,18 @@ impl std::fmt::Display for ArgsError {
 
 impl std::error::Error for ArgsError {}
 
-/// Запрос скрытого режима автодополнения: текущее и предыдущее слово
-/// командной строки по протоколу `t --complete <текущее> <предыдущее>`.
-/// Слова хранятся как получены от ОС: сравнение — байтовое.
+/// Запрос скрытого режима автодополнения. Без слов режим печатает
+/// bash-скрипт, с текущим и предыдущим словом — кандидатов.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompletionRequest {
-    pub current: OsString,
-    pub previous: OsString,
+pub enum CompletionRequest {
+    /// `t --complete`: напечатать bash-скрипт автодополнения.
+    Script,
+    /// `t --complete <текущее> <предыдущее>`: напечатать кандидатов.
+    /// Слова хранятся как получены от ОС: сравнение — байтовое.
+    Candidates {
+        current: OsString,
+        previous: OsString,
+    },
 }
 
 /// Обнаруживает скрытый режим автодополнения до обычного разбора
@@ -46,8 +51,11 @@ pub struct CompletionRequest {
 pub fn completion_request() -> Option<CompletionRequest> {
     let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
     match arguments.as_slice() {
+        [flag] if flag.as_encoded_bytes() == "--complete".as_bytes() => {
+            Some(CompletionRequest::Script)
+        }
         [flag, current, previous] if flag.as_encoded_bytes() == "--complete".as_bytes() => {
-            Some(CompletionRequest {
+            Some(CompletionRequest::Candidates {
                 current: current.clone(),
                 previous: previous.clone(),
             })

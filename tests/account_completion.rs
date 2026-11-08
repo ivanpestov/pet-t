@@ -11,6 +11,16 @@ use std::{
 /// escapes, so each name lands on its own line.
 const STUB_ACCOUNTS: &str = "work\\nwork:call\\npersonal\\nWork\\n";
 
+const COMPLETION_SCRIPT: &str = r#"# bash completion for t
+_t_completion() {
+    local current="${COMP_WORDS[COMP_CWORD]}"
+    local previous="${COMP_WORDS[COMP_CWORD-1]}"
+    COMPREPLY=()
+    mapfile -t COMPREPLY < <(command t --complete "$current" "$previous")
+}
+complete -F _t_completion t
+"#;
+
 struct TestDir {
     path: PathBuf,
 }
@@ -116,6 +126,29 @@ fn write_executable(path: &Path, contents: &str) {
     let mut permissions = fs::metadata(path).expect("stat command stub").permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).expect("make command stub executable");
+}
+
+#[test]
+fn bare_complete_prints_the_bash_completion_script() {
+    let output = Command::new(env!("CARGO_BIN_EXE_t"))
+        .arg("--complete")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("run completion script mode");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("utf8 stdout"),
+        COMPLETION_SCRIPT
+    );
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
