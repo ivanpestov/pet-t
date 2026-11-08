@@ -2,7 +2,10 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
-    os::unix::{ffi::OsStringExt, fs::PermissionsExt},
+    os::unix::{
+        ffi::OsStringExt,
+        fs::{PermissionsExt, symlink},
+    },
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -13,10 +16,20 @@ const STUB_ACCOUNTS: &str = "work\\nwork:call\\npersonal\\nWork\\n";
 
 const COMPLETION_SCRIPT: &str = r#"# bash completion for t
 _t_completion() {
-    local current="${COMP_WORDS[COMP_CWORD]}"
-    local previous="${COMP_WORDS[COMP_CWORD-1]}"
+    local line="${COMP_LINE:0:COMP_POINT}"
+    local current="${line##*[[:space:]]}"
+    local before="${line:0:${#line}-${#current}}"
+    before="${before%"${before##*[![:space:]]}"}"
+    local previous="${before##*[[:space:]]}"
     COMPREPLY=()
     mapfile -t COMPREPLY < <(command t --complete "$current" "$previous")
+    if [[ "$current" == *:* ]]; then
+        local prefix="${current%:*}:"
+        local index
+        for index in "${!COMPREPLY[@]}"; do
+            COMPREPLY[index]="${COMPREPLY[index]#"$prefix"}"
+        done
+    fi
 }
 complete -F _t_completion t
 "#;
@@ -147,6 +160,59 @@ fn bare_complete_prints_the_bash_completion_script() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("utf8 stdout"),
         COMPLETION_SCRIPT
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn completion_script_completes_segments_after_a_colon() {
+    let dir = TestDir::new("colon");
+    let bin = dir.path.join("bin");
+    symlink(env!("CARGO_BIN_EXE_t"), bin.join("t")).expect("link t binary");
+    write_executable(
+        &bin.join("ledger"),
+        "#!/bin/sh\nprintf 'work\\nmath:equations\\nmath:tests\\n'\n",
+    );
+    let script = dir.path.join("completion.bash");
+    let output = Command::new(env!("CARGO_BIN_EXE_t"))
+        .arg("--complete")
+        .output()
+        .expect("print completion script");
+    fs::write(&script, &output.stdout).expect("write completion script");
+
+    let inherited_path = env::var_os("PATH").unwrap_or_default();
+    let path = env::join_paths(
+        std::iter::once(bin.into_os_string())
+            .chain(env::split_paths(&inherited_path).map(|path| path.into_os_string())),
+    )
+    .expect("construct PATH");
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg(
+            "source \"$1\"; \
+             COMP_LINE='t math:'; \
+             COMP_POINT=${#COMP_LINE}; \
+             _t_completion; \
+             printf '%s\\n' \"${COMPREPLY[@]}\"",
+        )
+        .arg("bash")
+        .arg(&script)
+        .env("PATH", path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("run completion function");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("utf8 stdout"),
+        "equations\ntests\n"
     );
     assert!(output.stderr.is_empty());
 }

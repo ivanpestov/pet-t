@@ -12,10 +12,20 @@ use crate::adapters::args::CompletionRequest;
 /// не используется: bash добавляет к команде имя дополняемой команды.
 const BASH_SCRIPT: &str = r#"# bash completion for t
 _t_completion() {
-    local current="${COMP_WORDS[COMP_CWORD]}"
-    local previous="${COMP_WORDS[COMP_CWORD-1]}"
+    local line="${COMP_LINE:0:COMP_POINT}"
+    local current="${line##*[[:space:]]}"
+    local before="${line:0:${#line}-${#current}}"
+    before="${before%"${before##*[![:space:]]}"}"
+    local previous="${before##*[[:space:]]}"
     COMPREPLY=()
     mapfile -t COMPREPLY < <(command t --complete "$current" "$previous")
+    if [[ "$current" == *:* ]]; then
+        local prefix="${current%:*}:"
+        local index
+        for index in "${!COMPREPLY[@]}"; do
+            COMPREPLY[index]="${COMPREPLY[index]#"$prefix"}"
+        done
+    fi
 }
 complete -F _t_completion t
 "#;

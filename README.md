@@ -142,8 +142,10 @@ t --complete <current-word> <previous-word>
 which prints one account per line, taken from `ledger accounts`,
 filtered by the current word as a case-sensitive byte prefix. It
 suggests accounts only for the first positional argument after `t`;
-other positions produce no output. Failures, including a missing
-`ledger` command or `LEDGER_FILE`, produce empty output and exit code 0.
+other positions produce no output. Colon-separated segments are
+completed in place: after `math:`, only the remaining segment is
+inserted. Failures, including a missing `ledger` command or
+`LEDGER_FILE`, produce empty output and exit code 0.
 
 If an older registration such as `complete -F _todo t` exists in a
 startup file, remove it: it shadows the script above.
